@@ -76,8 +76,6 @@ impl Buy {
 /// 10. Creator vault (writable)
 /// 11. Event authority (readonly)
 /// 12. Pump.fun program ID (readonly)
-/// 13. Global volume accumulator (writable)
-/// 14. User volume accumulator (writable)
 pub fn buy(
     payer: &Keypair,
     mint: &Pubkey,
@@ -108,6 +106,8 @@ pub fn buy(
                 PumpFun::get_user_volume_accumulator_pda(&payer.pubkey()),
                 false,
             ),
+            AccountMeta::new_readonly(PumpFun::get_fee_config_pda(), false),
+            AccountMeta::new_readonly(constants::accounts::FEE_PROGRAM, false),
         ],
     )
 }
