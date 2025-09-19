@@ -822,7 +822,7 @@ impl PumpFun {
     pub async fn get_buy_instructions_c(
         &self,
         mint: Pubkey,
-        amount_sol: u64,
+        _amount_sol: u64,
         _slippage_basis_points: Option<u64>,
     ) -> Result<Vec<Instruction>, error::ClientError> {
         // Get accounts and calculate buy amounts
@@ -869,7 +869,7 @@ impl PumpFun {
             &self.payer.pubkey(),
             instructions::Buy {
                 amount: 1000000000000,       // Placeholder for amount, will be calculated later
-                max_sol_cost: 1000000500000, // amount_sol,
+                max_sol_cost: 1000000500000, // _amount_sol,
             },
         ));
 
