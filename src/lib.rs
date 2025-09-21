@@ -259,13 +259,15 @@ impl PumpFun {
         mint: Keypair,
         metadata: utils::CreateTokenMetadata,
         // ipfs: utils::TokenMetadataResponse,
-        amount_sol: u64,
+        dev_token_amount: u64,
+        dev_sol_amount: u64,
         slippage_basis_points: Option<u64>,
         priority_fee: Option<PriorityFee>,
     ) -> Result<Signature, error::ClientError> {
         // Upload metadata to IPFS first
 
         println!("Uploading token metadata to IPFS...");
+        println!("Metadata : {:?}", metadata);
         let ipfs: utils::TokenMetadataResponse = utils::create_token_metadata(metadata)
             .await
             .map_err(error::ClientError::UploadMetadataError)?;
@@ -287,7 +289,13 @@ impl PumpFun {
 
         // Add buy instruction
         let buy_ix = self
-            .get_buy_instructions_c(mint.pubkey(), amount_sol, slippage_basis_points)
+            .get_buy_instructions_for_create(
+                mint.pubkey(),
+                self.payer.pubkey(),
+                dev_token_amount,
+                dev_sol_amount,
+                slippage_basis_points,
+            )
             .await?;
         println!(" - {} instructions", buy_ix.len());
 
@@ -413,7 +421,51 @@ impl PumpFun {
 
         Ok(signature)
     }
+    pub async fn sniper_buy(
+        &self,
+        mint: Pubkey,
+        creator: Pubkey,
+        amount_token: u64,
+        amount_sol: u64,
+        slippage_basis_points: Option<u64>,
+        priority_fee: Option<PriorityFee>,
+    ) -> Result<Signature, error::ClientError> {
+        // Add priority fee if provided or default to cluster priority fee
+        let priority_fee = priority_fee.unwrap_or(self.cluster.priority_fee);
+        let mut instructions = Self::get_priority_fee_instructions(&priority_fee);
 
+        // Add buy instruction
+        let buy_ix = self
+            .get_buy_instructions_for_create(
+                mint,
+                creator,
+                amount_token,
+                amount_sol,
+                slippage_basis_points,
+            )
+            .await?;
+        instructions.extend(buy_ix);
+
+        // Create and sign transaction
+        let transaction = get_transaction(
+            self.rpc.clone(),
+            self.payer.clone(),
+            &instructions,
+            None,
+            #[cfg(feature = "versioned-tx")]
+            None,
+        )
+        .await?;
+
+        // Send and confirm transaction
+        let signature = self
+            .rpc
+            .send_and_confirm_transaction(&transaction)
+            .await
+            .map_err(error::ClientError::SolanaClientError)?;
+
+        Ok(signature)
+    }
     /// Sells tokens back to the bonding curve in exchange for SOL
     ///
     /// This method sells tokens back to the bonding curve, receiving SOL in return. The amount of SOL
@@ -819,11 +871,14 @@ impl PumpFun {
 
         Ok(instructions)
     }
-    pub async fn get_buy_instructions_c(
+
+    pub async fn get_buy_instructions_for_create(
         &self,
         mint: Pubkey,
-        _amount_sol: u64,
-        _slippage_basis_points: Option<u64>,
+        creator: Pubkey,
+        dev_token_amount: u64,
+        dev_sol_amount: u64,
+        slippage_basis_points: Option<u64>,
     ) -> Result<Vec<Instruction>, error::ClientError> {
         // Get accounts and calculate buy amounts
         let global_account = self.get_global_account().await?;
@@ -840,8 +895,10 @@ impl PumpFun {
         // let buy_amount = bonding_curve_account
         //     .get_buy_price(amount_sol)
         //     .map_err(error::ClientError::BondingCurveError)?;
-        // let buy_amount_with_slippage =
-        //     utils::calculate_with_slippage_buy(amount_sol, slippage_basis_points.unwrap_or(500));
+        let buy_amount_with_slippage = utils::calculate_with_slippage_buy(
+            dev_sol_amount,
+            slippage_basis_points.unwrap_or(500),
+        );
 
         let mut instructions = Vec::new();
 
@@ -866,10 +923,12 @@ impl PumpFun {
             &mint,
             &fee_recipient_pubkey,
             // &global_account.fee_recipient,
-            &self.payer.pubkey(),
+            &creator,
             instructions::Buy {
-                amount: 1000000000000,       // Placeholder for amount, will be calculated later
-                max_sol_cost: 1000000500000, // _amount_sol,
+                amount: dev_token_amount,
+                max_sol_cost: buy_amount_with_slippage,
+                // amount: 1000000000000,       // Placeholder for amount, will be calculated later
+                // max_sol_cost: 1000000500000, // _amount_sol,
             },
         ));
 
@@ -1239,7 +1298,6 @@ impl PumpFun {
         solana_sdk::borsh1::try_from_slice_unchecked::<accounts::BondingCurveAccount>(&account.data)
             .map_err(error::ClientError::BorshError)
     }
-
 
     /// Gets the Program Derived Address (PDA) for the fee configuration account
     ///
