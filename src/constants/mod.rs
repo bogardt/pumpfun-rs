@@ -24,6 +24,7 @@ pub mod accounts {
 
     /// Public key for the Pump.fun program
     pub const PUMPFUN: Pubkey = pubkey!("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P");
+    pub const PUMPFUN_VAULT_FEES: Pubkey = pubkey!("EvsvMTSbqCoNRcDsU7jGp5W76GTyiuKBnMR4csNqEptv");
 
     /// Public key for the MPL Token Metadata program
     pub const MPL_TOKEN_METADATA: Pubkey = pubkey!("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");

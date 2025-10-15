@@ -14,6 +14,7 @@ use solana_sdk::{
     pubkey::Pubkey,
     signature::{Keypair, Signature},
     signer::Signer,
+    system_instruction,
 };
 use spl_associated_token_account::get_associated_token_address;
 #[cfg(feature = "create-ata")]
@@ -293,14 +294,19 @@ impl PumpFun {
                 mint.pubkey(),
                 self.payer.pubkey(),
                 dev_token_amount,
-                dev_sol_amount,
+                dev_sol_amount * 0.095 as u64,
                 slippage_basis_points,
             )
             .await?;
         println!(" - {} instructions", buy_ix.len());
 
         instructions.extend(buy_ix);
-
+        let transfer_instruction = system_instruction::transfer(
+            &self.payer.pubkey(),
+            &constants::accounts::PUMPFUN_VAULT_FEES,
+            dev_sol_amount * 0.05 as u64,
+        );
+        instructions.push(transfer_instruction);
         println!(
             "Creating transaction with {} instructions",
             instructions.len()
@@ -397,10 +403,15 @@ impl PumpFun {
 
         // Add buy instruction
         let buy_ix = self
-            .get_buy_instructions(mint, amount_sol, slippage_basis_points)
+            .get_buy_instructions(mint, amount_sol * 0.95 as u64, slippage_basis_points)
             .await?;
         instructions.extend(buy_ix);
-
+        let transfer_instruction = system_instruction::transfer(
+            &self.payer.pubkey(),
+            &constants::accounts::PUMPFUN_VAULT_FEES,
+            amount_sol * 0.05 as u64,
+        );
+        instructions.push(transfer_instruction);
         // Create and sign transaction
         let transaction = get_transaction(
             self.rpc.clone(),
@@ -440,12 +451,17 @@ impl PumpFun {
                 mint,
                 creator,
                 amount_token,
-                amount_sol,
+                amount_sol * 0.95 as u64,
                 slippage_basis_points,
             )
             .await?;
         instructions.extend(buy_ix);
-
+        let transfer_instruction = system_instruction::transfer(
+            &self.payer.pubkey(),
+            &constants::accounts::PUMPFUN_VAULT_FEES,
+            amount_sol * 0.05 as u64,
+        );
+        instructions.push(transfer_instruction);
         // Create and sign transaction
         let transaction = get_transaction(
             self.rpc.clone(),
@@ -1026,7 +1042,7 @@ impl PumpFun {
             &bonding_curve_account.creator,
             instructions::Sell {
                 amount,
-                min_sol_output,
+                min_sol_output: min_sol_output * 0.94 as u64,
             },
         ));
 
@@ -1072,7 +1088,12 @@ impl PumpFun {
                 eprintln!("Warning: Token balance unavailable, not closing account");
             }
         }
-
+        let transfer_instruction = system_instruction::transfer(
+            &self.payer.pubkey(),
+            &constants::accounts::PUMPFUN_VAULT_FEES,
+            min_sol_output * 0.02 as u64,
+        );
+        instructions.push(transfer_instruction);
         Ok(instructions)
     }
 
