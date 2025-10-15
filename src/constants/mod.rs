@@ -1,16 +1,3 @@
-//! Constants used by the crate.
-//!
-//! This module contains various constants used throughout the crate, including:
-//!
-//! - Seeds for deriving Program Derived Addresses (PDAs)
-//! - Program account addresses and public keys
-//!
-//! The constants are organized into submodules for better organization:
-//!
-//! - `seeds`: Contains seed values used for PDA derivation
-//! - `accounts`: Contains important program account addresses
-
-/// Constants used as seeds for deriving PDAs (Program Derived Addresses)
 pub mod seeds {
     /// Seed for the global state PDA
     pub const GLOBAL_SEED: &[u8] = b"global";
@@ -26,6 +13,9 @@ pub mod seeds {
 
     /// Seed for creator vault PDA
     pub const CREATOR_VAULT_SEED: &[u8] = b"creator-vault";
+
+    /// Seed for fee config PDA
+    pub const FEE_CONFIG_SEED: &[u8] = b"fee_config";
 }
 
 /// Constants related to program accounts and authorities
@@ -34,6 +24,7 @@ pub mod accounts {
 
     /// Public key for the Pump.fun program
     pub const PUMPFUN: Pubkey = pubkey!("6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P");
+    pub const PUMPFUN_VAULT_FEES: Pubkey = pubkey!("EvsvMTSbqCoNRcDsU7jGp5W76GTyiuKBnMR4csNqEptv");
 
     /// Public key for the MPL Token Metadata program
     pub const MPL_TOKEN_METADATA: Pubkey = pubkey!("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
@@ -48,11 +39,15 @@ pub mod accounts {
     pub const TOKEN_PROGRAM: Pubkey = pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 
     // Global Volume Accumulator
-    pub const GLOBAL_VOLUME_ACCUMULATOR: Pubkey = pubkey!("Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y");
+    pub const GLOBAL_VOLUME_ACCUMULATOR: Pubkey =
+        pubkey!("Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y");
 
     /// Associated Token Program ID
     pub const ASSOCIATED_TOKEN_PROGRAM: Pubkey =
         pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
+
+    /// Fee Program ID
+    pub const FEE_PROGRAM: Pubkey = pubkey!("pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ");
 
     /// Rent Sysvar ID
     pub const RENT: Pubkey = pubkey!("SysvarRent111111111111111111111111111111111");
