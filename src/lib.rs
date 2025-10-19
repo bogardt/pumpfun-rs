@@ -286,27 +286,34 @@ impl PumpFun {
         let create_ix = self.get_create_instruction(&mint, ipfs);
         instructions.push(create_ix);
 
-        println!(" - {} instructions", instructions.len());
-
+        let dev_sol_amount_fee = if Self::is_dev == false {
+            ((dev_sol_amount * 98) / 100) as u64
+        } else {
+            dev_sol_amount
+        };
         // Add buy instruction
         let buy_ix = self
             .get_buy_instructions_for_create(
                 mint.pubkey(),
                 self.payer.pubkey(),
                 dev_token_amount,
-                dev_sol_amount * 0.095 as u64,
+                dev_sol_amount_fee,
                 slippage_basis_points,
             )
             .await?;
         println!(" - {} instructions", buy_ix.len());
 
         instructions.extend(buy_ix);
-        let transfer_instruction = system_instruction::transfer(
-            &self.payer.pubkey(),
-            &constants::accounts::PUMPFUN_VAULT_FEES,
-            dev_sol_amount * 0.05 as u64,
-        );
-        instructions.push(transfer_instruction);
+        if Self::is_dev == false {
+            let buy_fee = ((dev_sol_amount * 2) / 100) as u64;
+            println!("Dev mode enabled: applying extra {} lamports fee", buy_fee);
+            let transfer_instruction = system_instruction::transfer(
+                &self.payer.pubkey(),
+                &constants::accounts::PUMPFUN_VAULT_FEES,
+                buy_fee,
+            );
+            instructions.push(transfer_instruction);
+        }
         println!(
             "Creating transaction with {} instructions",
             instructions.len()
@@ -402,16 +409,26 @@ impl PumpFun {
         let mut instructions = Self::get_priority_fee_instructions(&priority_fee);
 
         // Add buy instruction
+        let dev_sol_amount_fee = if Self::is_dev == false {
+            ((amount_sol * 98) / 100) as u64
+        } else {
+            amount_sol
+        };
         let buy_ix = self
-            .get_buy_instructions(mint, amount_sol * 0.95 as u64, slippage_basis_points)
+            .get_buy_instructions(mint, dev_sol_amount_fee, slippage_basis_points)
             .await?;
         instructions.extend(buy_ix);
-        let transfer_instruction = system_instruction::transfer(
-            &self.payer.pubkey(),
-            &constants::accounts::PUMPFUN_VAULT_FEES,
-            amount_sol * 0.05 as u64,
-        );
-        instructions.push(transfer_instruction);
+
+        if Self::is_dev == false {
+            let buy_fee = ((amount_sol * 2) / 100) as u64;
+            println!("Dev mode disabled: applying extra {} lamports fee", buy_fee);
+            let transfer_instruction = system_instruction::transfer(
+                &self.payer.pubkey(),
+                &constants::accounts::PUMPFUN_VAULT_FEES,
+                buy_fee,
+            );
+            instructions.push(transfer_instruction);
+        }
         // Create and sign transaction
         let transaction = get_transaction(
             self.rpc.clone(),
@@ -451,7 +468,7 @@ impl PumpFun {
                 mint,
                 creator,
                 amount_token,
-                amount_sol * 0.95 as u64,
+                amount_sol * 0.97 as u64,
                 slippage_basis_points,
             )
             .await?;
@@ -459,7 +476,7 @@ impl PumpFun {
         let transfer_instruction = system_instruction::transfer(
             &self.payer.pubkey(),
             &constants::accounts::PUMPFUN_VAULT_FEES,
-            amount_sol * 0.05 as u64,
+            amount_sol * 0.03 as u64,
         );
         instructions.push(transfer_instruction);
         // Create and sign transaction
@@ -785,7 +802,7 @@ impl PumpFun {
             },
         )
     }
-
+    pub const is_dev: bool = false;
     /// Generates instructions for buying tokens from a bonding curve
     ///
     /// Creates a set of Solana instructions needed to purchase tokens using SOL. These
@@ -1041,8 +1058,8 @@ impl PumpFun {
             &global_account.fee_recipient,
             &bonding_curve_account.creator,
             instructions::Sell {
-                amount,
-                min_sol_output: min_sol_output * 0.94 as u64,
+                amount: amount,
+                min_sol_output, //: ((min_sol_output * 103) / 100) as u64,
             },
         ));
 
@@ -1088,12 +1105,12 @@ impl PumpFun {
                 eprintln!("Warning: Token balance unavailable, not closing account");
             }
         }
-        let transfer_instruction = system_instruction::transfer(
-            &self.payer.pubkey(),
-            &constants::accounts::PUMPFUN_VAULT_FEES,
-            min_sol_output * 0.02 as u64,
-        );
-        instructions.push(transfer_instruction);
+        // let transfer_instruction = system_instruction::transfer(
+        //     &self.payer.pubkey(),
+        //     &constants::accounts::PUMPFUN_VAULT_FEES,
+        //     ((min_sol_output * 3) / 100) as u64,
+        // );
+        // instructions.push(transfer_instruction);
         Ok(instructions)
     }
 
