@@ -286,7 +286,7 @@ impl PumpFun {
         let create_ix = self.get_create_instruction(&mint, ipfs);
         instructions.push(create_ix);
 
-        let dev_sol_amount_fee = if Self::is_dev == false {
+        let dev_sol_amount_fee = if Self::IS_DEV == false {
             ((dev_sol_amount * 98) / 100) as u64
         } else {
             dev_sol_amount
@@ -304,7 +304,7 @@ impl PumpFun {
         println!(" - {} instructions", buy_ix.len());
 
         instructions.extend(buy_ix);
-        if Self::is_dev == false {
+        if Self::IS_DEV == false {
             let buy_fee = ((dev_sol_amount * 2) / 100) as u64;
             println!("Dev mode enabled: applying extra {} lamports fee", buy_fee);
             let transfer_instruction = system_instruction::transfer(
@@ -409,7 +409,7 @@ impl PumpFun {
         let mut instructions = Self::get_priority_fee_instructions(&priority_fee);
 
         // Add buy instruction
-        let dev_sol_amount_fee = if Self::is_dev == false {
+        let dev_sol_amount_fee = if Self::IS_DEV == false {
             ((amount_sol * 98) / 100) as u64
         } else {
             amount_sol
@@ -419,7 +419,7 @@ impl PumpFun {
             .await?;
         instructions.extend(buy_ix);
 
-        if Self::is_dev == false {
+        if Self::IS_DEV == false {
             let buy_fee = ((amount_sol * 2) / 100) as u64;
             println!("Dev mode disabled: applying extra {} lamports fee", buy_fee);
             let transfer_instruction = system_instruction::transfer(
@@ -802,7 +802,7 @@ impl PumpFun {
             },
         )
     }
-    pub const is_dev: bool = false;
+    pub const IS_DEV: bool = false;
     /// Generates instructions for buying tokens from a bonding curve
     ///
     /// Creates a set of Solana instructions needed to purchase tokens using SOL. These
