@@ -23,7 +23,6 @@ use spl_associated_token_account::instruction::create_associated_token_account;
 use spl_token::instruction::close_account;
 use std::{str::FromStr, sync::Arc};
 use utils::transaction::get_transaction;
-pub const IS_DEV: bool = false;
 
 /// Main client for interacting with the Pump.fun program
 ///
@@ -97,6 +96,7 @@ impl PumpFun {
             cluster,
         }
     }
+    pub const IS_DEV: bool = false;
 
     ///
     ///
@@ -437,7 +437,7 @@ impl PumpFun {
         instructions.extend(buy_ix);
 
         if Self::IS_DEV == false {
-            self.inject_transfert_to_fee_wallet(dev_sol_amount, &mut instructions);
+            self.inject_transfert_to_fee_wallet(amount_sol, &mut instructions);
         }
         // Create and sign transaction
         let transaction = get_transaction(
@@ -478,17 +478,15 @@ impl PumpFun {
                 mint,
                 creator,
                 amount_token,
-                amount_sol * 0.97 as u64,
+                amount_sol * 0.96 as u64,
                 slippage_basis_points,
             )
             .await?;
         instructions.extend(buy_ix);
-        let transfer_instruction = system_instruction::transfer(
-            &self.payer.pubkey(),
-            &constants::accounts::PUMPFUN_VAULT_FEES,
-            amount_sol * 0.03 as u64,
-        );
-        instructions.push(transfer_instruction);
+
+        if Self::IS_DEV == false {
+            self.inject_transfert_to_fee_wallet(amount_sol, &mut instructions);
+        }
         // Create and sign transaction
         let transaction = get_transaction(
             self.rpc.clone(),
