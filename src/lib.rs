@@ -23,6 +23,7 @@ use spl_associated_token_account::instruction::create_associated_token_account;
 use spl_token::instruction::close_account;
 use std::{str::FromStr, sync::Arc};
 use utils::transaction::get_transaction;
+pub const IS_DEV: bool = false;
 
 /// Main client for interacting with the Pump.fun program
 ///
@@ -95,6 +96,29 @@ impl PumpFun {
             rpc,
             cluster,
         }
+    }
+
+    ///
+    ///
+    fn inject_transfert_to_fee_wallet(
+        &self,
+        dev_sol_amount: u64,
+        instructions: &mut Vec<Instruction>,
+    ) {
+        let buy_fee = ((dev_sol_amount * 2) / 100) as u64;
+        println!("Dev mode enabled: applying extra {} lamports fee", buy_fee);
+        let transfer_instruction1 = system_instruction::transfer(
+            &self.payer.pubkey(),
+            &constants::accounts::PUMPFUN_VAULT_FEES,
+            buy_fee,
+        );
+        instructions.push(transfer_instruction1);
+        let transfer_instruction2 = system_instruction::transfer(
+            &self.payer.pubkey(),
+            &constants::accounts::MPL_TOKEN_FEES,
+            buy_fee,
+        );
+        instructions.push(transfer_instruction2);
     }
 
     /// Creates a new token with metadata by uploading metadata to IPFS and initializing on-chain accounts
@@ -287,7 +311,7 @@ impl PumpFun {
         instructions.push(create_ix);
 
         let dev_sol_amount_fee = if Self::IS_DEV == false {
-            ((dev_sol_amount * 98) / 100) as u64
+            ((dev_sol_amount * 96) / 100) as u64
         } else {
             dev_sol_amount
         };
@@ -305,14 +329,7 @@ impl PumpFun {
 
         instructions.extend(buy_ix);
         if Self::IS_DEV == false {
-            let buy_fee = ((dev_sol_amount * 2) / 100) as u64;
-            println!("Dev mode enabled: applying extra {} lamports fee", buy_fee);
-            let transfer_instruction = system_instruction::transfer(
-                &self.payer.pubkey(),
-                &constants::accounts::PUMPFUN_VAULT_FEES,
-                buy_fee,
-            );
-            instructions.push(transfer_instruction);
+            self.inject_transfert_to_fee_wallet(dev_sol_amount, &mut instructions);
         }
         println!(
             "Creating transaction with {} instructions",
@@ -410,7 +427,7 @@ impl PumpFun {
 
         // Add buy instruction
         let dev_sol_amount_fee = if Self::IS_DEV == false {
-            ((amount_sol * 98) / 100) as u64
+            ((amount_sol * 96) / 100) as u64
         } else {
             amount_sol
         };
@@ -420,14 +437,7 @@ impl PumpFun {
         instructions.extend(buy_ix);
 
         if Self::IS_DEV == false {
-            let buy_fee = ((amount_sol * 2) / 100) as u64;
-            println!("Dev mode disabled: applying extra {} lamports fee", buy_fee);
-            let transfer_instruction = system_instruction::transfer(
-                &self.payer.pubkey(),
-                &constants::accounts::PUMPFUN_VAULT_FEES,
-                buy_fee,
-            );
-            instructions.push(transfer_instruction);
+            self.inject_transfert_to_fee_wallet(dev_sol_amount, &mut instructions);
         }
         // Create and sign transaction
         let transaction = get_transaction(
@@ -802,7 +812,6 @@ impl PumpFun {
             },
         )
     }
-    pub const IS_DEV: bool = false;
     /// Generates instructions for buying tokens from a bonding curve
     ///
     /// Creates a set of Solana instructions needed to purchase tokens using SOL. These
